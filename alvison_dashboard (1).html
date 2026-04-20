@@ -1,0 +1,534 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Alvison — Monitor de Ruido</title>
+<link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Syne:wght@400;600;700;800&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #0a0c0f;
+    --surface: #111318;
+    --surface2: #181c24;
+    --border: #1e2330;
+    --text: #e8eaf0;
+    --muted: #5a6075;
+    --accent: #00e5a0;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: var(--bg); color: var(--text); font-family: 'Syne', sans-serif; min-height: 100vh; overflow-x: hidden; }
+
+  header { display: flex; align-items: center; justify-content: space-between; padding: 16px 32px; border-bottom: 1px solid var(--border); background: var(--surface); position: sticky; top: 0; z-index: 200; }
+  .logo { font-size: 1.1rem; font-weight: 800; letter-spacing: .12em; text-transform: uppercase; color: var(--accent); }
+  .logo span { color: var(--text); }
+  .live-badge { display: flex; align-items: center; gap: 7px; font-family: 'DM Mono',monospace; font-size: .7rem; color: var(--muted); text-transform: uppercase; letter-spacing: .1em; }
+  .live-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); animation: pulse 2s ease-in-out infinite; }
+  @keyframes pulse { 0%,100%{opacity:1;transform:scale(1)} 50%{opacity:.4;transform:scale(.7)} }
+  #last-update { font-family: 'DM Mono',monospace; font-size: .7rem; color: var(--muted); }
+
+  .main { display: flex; flex-direction: column; gap: 20px; padding: 24px 32px; max-width: 1100px; margin: 0 auto; }
+  .panel { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; }
+  .panel-header { padding: 14px 20px; border-bottom: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; }
+  .panel-title { font-size: .7rem; font-weight: 700; text-transform: uppercase; letter-spacing: .14em; color: var(--muted); }
+
+  .map-wrap { padding: 24px; display: flex; justify-content: center; align-items: center; }
+  .campus-svg { width: 100%; max-width: 580px; height: auto; }
+  .bloque { cursor: pointer; -webkit-tap-highlight-color: transparent; touch-action: manipulation; }
+  .bloque-body { stroke: #1e2330; stroke-width: 1.5; transition: fill .6s ease; }
+  .bloque:hover .bloque-body { filter: brightness(1.3); }
+  .bloque-label { font-family: 'Syne',sans-serif; font-weight: 800; font-size: 13px; fill: rgba(255,255,255,.9); text-anchor: middle; pointer-events: none; }
+  .bloque-db { font-family: 'DM Mono',monospace; font-size: 11px; fill: rgba(255,255,255,.65); text-anchor: middle; pointer-events: none; }
+  .bloque-nivel { font-family: 'Syne',sans-serif; font-size: 9px; font-weight: 600; fill: rgba(255,255,255,.45); text-anchor: middle; pointer-events: none; letter-spacing: .07em; }
+  .sensor-dot { transition: fill .5s ease; }
+  .sensor-ring { fill: none; stroke-width: 1.5; animation: ring-pulse 2.5s ease-out infinite; }
+  @keyframes ring-pulse { 0%{r:8;opacity:.6} 100%{r:22;opacity:0} }
+
+  .legend { display: flex; gap: 14px; flex-wrap: wrap; padding: 0 20px 14px; }
+  .legend-item { display: flex; align-items: center; gap: 5px; font-family: 'DM Mono',monospace; font-size: .62rem; color: var(--muted); }
+  .legend-dot { width: 8px; height: 8px; border-radius: 50%; }
+
+  .admin-toggle { font-family: 'DM Mono',monospace; font-size: .65rem; color: var(--muted); background: none; border: 1px solid var(--border); border-radius: 5px; padding: 4px 10px; cursor: pointer; transition: all .2s; text-transform: uppercase; letter-spacing: .08em; }
+  .admin-toggle:hover { border-color: var(--accent); color: var(--accent); }
+  .admin-panel { display: none; padding: 16px 20px; border-top: 1px solid var(--border); background: var(--bg); }
+  .admin-panel.open { display: block; }
+  .admin-grid { display: grid; grid-template-columns: repeat(auto-fill,minmax(210px,1fr)); gap: 12px; }
+  .admin-card { background: var(--surface2); border: 1px solid var(--border); border-radius: 8px; padding: 12px; }
+  .admin-card label { font-size: .65rem; color: var(--muted); text-transform: uppercase; letter-spacing: .1em; display: block; margin-bottom: 4px; }
+  .admin-card input, .admin-card select { width: 100%; background: var(--bg); border: 1px solid var(--border); border-radius: 5px; color: var(--text); font-family: 'DM Mono',monospace; font-size: .8rem; padding: 6px 10px; margin-bottom: 8px; outline: none; transition: border-color .2s; }
+  .admin-card input:focus, .admin-card select:focus { border-color: var(--accent); }
+  .admin-save { width: 100%; background: var(--accent); color: #000; border: none; border-radius: 5px; padding: 7px; font-family: 'Syne',sans-serif; font-weight: 700; font-size: .75rem; cursor: pointer; text-transform: uppercase; letter-spacing: .08em; }
+  .admin-save:hover { opacity: .85; }
+
+  /* Slide panel */
+  #slide-panel { position: fixed; top: 0; right: -105vw; width: min(400px, 100vw); height: 100vh; background: var(--surface); border-left: 1px solid var(--border); z-index: 300; transition: right .35s cubic-bezier(.4,0,.2,1); display: flex; flex-direction: column; overflow: hidden; }
+  #slide-panel.open { right: 0; }
+  @media (max-width: 600px) { .main { padding: 12px 14px; } }
+  .slide-header { padding: 18px 20px; border-bottom: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; flex-shrink: 0; }
+  .slide-title { font-size: .85rem; font-weight: 700; }
+  .slide-close { background: none; border: none; color: var(--muted); font-size: 1.2rem; cursor: pointer; padding: 4px 8px; border-radius: 4px; }
+  .slide-close:hover { color: var(--text); }
+  .slide-body { padding: 20px; overflow-y: auto; flex: 1; display: flex; flex-direction: column; gap: 16px; }
+  .slide-db-wrap { text-align: center; padding: 28px 0 16px; }
+  .slide-db-value { font-family: 'DM Mono',monospace; font-size: 4.5rem; font-weight: 500; line-height: 1; transition: color .4s; }
+  .slide-db-unit { font-size: 1.3rem; opacity: .5; }
+  .slide-nivel { font-size: .8rem; font-weight: 700; text-transform: uppercase; letter-spacing: .12em; margin-top: 8px; transition: color .4s; }
+  .slide-bloque-badge { font-family: 'DM Mono',monospace; font-size: .65rem; color: var(--muted); background: var(--border); padding: 3px 10px; border-radius: 4px; display: inline-block; margin-top: 10px; }
+  .color-bar { height: 6px; border-radius: 3px; background: linear-gradient(to right,#00c853,#76ff03,#ffd600,#ff6d00,#ff1744); position: relative; }
+  .color-bar-cursor { position: absolute; top: -4px; width: 14px; height: 14px; border-radius: 50%; border: 2px solid var(--bg); transform: translateX(-50%); transition: left .4s ease; }
+  .slide-stats { display: flex; flex-direction: column; gap: 8px; }
+  .stat-row { display: flex; justify-content: space-between; align-items: center; padding: 10px 14px; background: var(--surface2); border-radius: 8px; border: 1px solid var(--border); }
+  .stat-label { font-size: .7rem; color: var(--muted); text-transform: uppercase; letter-spacing: .08em; }
+  .stat-value { font-family: 'DM Mono',monospace; font-size: .8rem; }
+  .slide-offline { text-align: center; padding: 50px 20px; color: var(--muted); font-size: .85rem; }
+  #overlay { position: fixed; inset: 0; background: rgba(0,0,0,.55); z-index: 299; opacity: 0; pointer-events: none; transition: opacity .35s; }
+  #overlay.open { opacity: 1; pointer-events: all; }
+
+  /* Player */
+  .player-wrap { padding: 20px 24px; }
+  .player-controls { display: flex; align-items: center; gap: 12px; margin-bottom: 20px; background: var(--surface2); border: 1px solid var(--border); border-radius: 10px; padding: 12px 16px; }
+  .play-btn { width: 36px; height: 36px; border-radius: 50%; background: var(--accent); border: none; cursor: pointer; display: flex; align-items: center; justify-content: center; flex-shrink: 0; transition: opacity .2s; }
+  .play-btn:hover { opacity: .85; }
+  .play-btn svg { fill: #000; }
+  .player-right { flex: 1; display: flex; flex-direction: column; gap: 6px; }
+  .player-time { font-family: 'DM Mono',monospace; font-size: .65rem; color: var(--muted); display: flex; justify-content: space-between; }
+  input[type=range].timeline { width: 100%; appearance: none; height: 4px; background: var(--border); border-radius: 2px; outline: none; cursor: pointer; }
+  input[type=range].timeline::-webkit-slider-thumb { appearance: none; width: 14px; height: 14px; border-radius: 50%; background: var(--accent); cursor: pointer; }
+  .speed-btn { font-family: 'DM Mono',monospace; font-size: .65rem; color: var(--muted); background: none; border: 1px solid var(--border); border-radius: 4px; padding: 4px 10px; cursor: pointer; transition: all .2s; flex-shrink: 0; }
+  .speed-btn:hover { border-color: var(--accent); color: var(--accent); }
+  .hist-empty { text-align: center; padding: 48px; color: var(--muted); font-family: 'DM Mono',monospace; font-size: .75rem; border: 1px dashed var(--border); border-radius: 8px; }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo">Alvison <span>/ Ruido</span></div>
+  <div class="live-badge"><div class="live-dot"></div> En vivo</div>
+  <div id="last-update">Conectando…</div>
+</header>
+
+<div id="overlay" onclick="closePanel()"></div>
+
+<!-- Slide panel -->
+<div id="slide-panel">
+  <div class="slide-header">
+    <div class="slide-title" id="slide-title">Sensor</div>
+    <button class="slide-close" onclick="closePanel()">✕</button>
+  </div>
+  <div class="slide-body" id="slide-body"></div>
+</div>
+
+<div class="main">
+
+  <!-- Mapa en vivo -->
+  <div class="panel">
+    <div class="panel-header">
+      <span class="panel-title">Campus en vivo — Bloques 18 · 19 · 20 · 21</span>
+      <button class="admin-toggle" onclick="toggleAdmin()">⚙ Admin</button>
+    </div>
+    <div class="map-wrap">
+      <svg id="live-svg" class="campus-svg" viewBox="0 0 560 420" xmlns="http://www.w3.org/2000/svg" style="max-width:800px">
+        <rect width="560" height="420" fill="#0d1017" rx="8"/>
+        <circle cx="60" cy="60" r="28" fill="#0f1a12" opacity=".8"/>
+        <circle cx="120" cy="40" r="18" fill="#0f1a12" opacity=".6"/>
+        <circle cx="30" cy="150" r="22" fill="#0f1a12" opacity=".7"/>
+        <circle cx="490" cy="80" r="20" fill="#0f1a12" opacity=".6"/>
+        <circle cx="520" cy="160" r="25" fill="#0f1a12" opacity=".7"/>
+        <circle cx="80" cy="360" r="20" fill="#0f1a12" opacity=".6"/>
+        <circle cx="460" cy="370" r="24" fill="#0f1a12" opacity=".7"/>
+        <circle cx="280" cy="390" r="18" fill="#0f1a12" opacity=".5"/>
+        <circle cx="160" cy="380" r="15" fill="#0f1a12" opacity=".5"/>
+        <g class="bloque" onclick="openBloque(20)">
+          <rect class="bloque-body" id="lb-20" x="80" y="60" width="160" height="100" fill="#1a2035" rx="4"/>
+          <rect x="110" y="85" width="100" height="50" fill="#0d1017" opacity=".6" rx="2"/>
+          <text class="bloque-label" x="160" y="78">20</text>
+          <text class="bloque-db" id="ldb-20" x="160" y="122">—</text>
+          <text class="bloque-nivel" id="lnv-20" x="160" y="148">Sin sensor</text>
+        </g>
+        <g class="bloque" onclick="openBloque(19)">
+          <rect class="bloque-body" id="lb-19" x="310" y="40" width="180" height="160" fill="#1a2035" rx="4"/>
+          <rect x="345" y="75" width="110" height="90" fill="#0d1017" opacity=".6" rx="2"/>
+          <text class="bloque-label" x="400" y="58">19</text>
+          <text class="bloque-db" id="ldb-19" x="400" y="175">—</text>
+          <text class="bloque-nivel" id="lnv-19" x="400" y="190">Sin sensor</text>
+        </g>
+        <g class="bloque" onclick="openBloque(21)">
+          <rect class="bloque-body" id="lb-21" x="80" y="200" width="160" height="90" fill="#1a2035" rx="4"/>
+          <rect x="110" y="220" width="100" height="50" fill="#0d1017" opacity=".5" rx="2"/>
+          <text class="bloque-label" x="160" y="218">21</text>
+          <text class="bloque-db" id="ldb-21" x="160" y="262">—</text>
+          <text class="bloque-nivel" id="lnv-21" x="160" y="278">Sin sensor</text>
+        </g>
+        <g class="bloque" onclick="openBloque(18)">
+          <rect class="bloque-body" id="lb-18" x="160" y="315" width="200" height="80" fill="#1a2035" rx="4"/>
+          <rect x="195" y="332" width="130" height="46" fill="#0d1017" opacity=".5" rx="2"/>
+          <text class="bloque-label" x="260" y="332">18</text>
+          <text class="bloque-db" id="ldb-18" x="260" y="368">—</text>
+          <text class="bloque-nivel" id="lnv-18" x="260" y="382">Sin sensor</text>
+        </g>
+        <!-- dots -->
+        <g id="ld-0" display="none"><circle class="sensor-ring" id="lr-0" cx="160" cy="110" r="8" stroke="#444"/><circle class="sensor-dot" id="lc-0" cx="160" cy="110" r="7" fill="#444"/><text font-family="DM Mono,monospace" font-size="8" fill="white" text-anchor="middle" id="ll-0" x="160" y="113" pointer-events="none">S1</text></g>
+        <g id="ld-1" display="none"><circle class="sensor-ring" id="lr-1" cx="400" cy="120" r="8" stroke="#444"/><circle class="sensor-dot" id="lc-1" cx="400" cy="120" r="7" fill="#444"/><text font-family="DM Mono,monospace" font-size="8" fill="white" text-anchor="middle" id="ll-1" x="400" y="123" pointer-events="none">S2</text></g>
+        <g id="ld-2" display="none"><circle class="sensor-ring" id="lr-2" cx="160" cy="245" r="8" stroke="#444"/><circle class="sensor-dot" id="lc-2" cx="160" cy="245" r="7" fill="#444"/><text font-family="DM Mono,monospace" font-size="8" fill="white" text-anchor="middle" id="ll-2" x="160" y="248" pointer-events="none">S3</text></g>
+        <g id="ld-3" display="none"><circle class="sensor-ring" id="lr-3" cx="260" cy="355" r="8" stroke="#444"/><circle class="sensor-dot" id="lc-3" cx="260" cy="355" r="7" fill="#444"/><text font-family="DM Mono,monospace" font-size="8" fill="white" text-anchor="middle" id="ll-3" x="260" y="358" pointer-events="none">S4</text></g>
+      </svg>
+    </div>
+    <div class="legend">
+      <div class="legend-item"><div class="legend-dot" style="background:#00c853"></div>30-40 Muy silencioso</div>
+      <div class="legend-item"><div class="legend-dot" style="background:#69f542"></div>40-50 Silencioso</div>
+      <div class="legend-item"><div class="legend-dot" style="background:#ffd600"></div>50-55 Normal</div>
+      <div class="legend-item"><div class="legend-dot" style="background:#ff6d00"></div>55-65 Activo</div>
+      <div class="legend-item"><div class="legend-dot" style="background:#ff1744"></div>65+ Ruidoso</div>
+      <div class="legend-item" style="margin-left:auto;opacity:.6;font-size:.6rem">Clic en bloque → detalle</div>
+    </div>
+    <div class="admin-panel" id="admin-panel">
+      <p style="font-size:.7rem;color:var(--muted);margin-bottom:12px;font-family:'DM Mono',monospace;">CONFIGURACIÓN DE SENSORES</p>
+      <div class="admin-grid" id="admin-grid"></div>
+    </div>
+  </div>
+
+  <!-- Mapa histórico -->
+  <div class="panel">
+    <div class="panel-header" onclick="toggleHistPanel()" style="cursor:pointer;user-select:none;">
+      <span class="panel-title">Reproducción histórica</span>
+      <div style="display:flex;align-items:center;gap:10px">
+        <span id="hist-ts" style="font-family:'DM Mono',monospace;font-size:.7rem;color:var(--muted)"></span>
+        <span id="hist-chevron" style="color:var(--muted);font-size:.8rem;transition:transform .3s">▼</span>
+      </div>
+    </div>
+    <div id="hist-body" style="display:none">
+    <div class="player-wrap">
+      <div class="player-controls" id="player-controls" style="display:none">
+        <button class="play-btn" id="play-btn" onclick="togglePlay()">
+          <svg id="play-icon" width="14" height="14" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+        </button>
+        <div class="player-right">
+          <div class="player-time"><span id="t-cur">—</span><span id="t-tot">—</span></div>
+          <input type="range" class="timeline" id="slider" min="0" value="0" oninput="onSlider(this.value)">
+        </div>
+        <button class="speed-btn" onclick="cycleSpeed()">×<span id="spd">1</span></button>
+      </div>
+      <div style="display:flex;justify-content:center">
+        <svg id="hist-svg" class="campus-svg" viewBox="0 0 560 420" xmlns="http://www.w3.org/2000/svg">
+          <rect width="560" height="420" fill="#0d1017" rx="8"/>
+          <circle cx="60" cy="60" r="28" fill="#0f1a12" opacity=".8"/>
+          <circle cx="120" cy="40" r="18" fill="#0f1a12" opacity=".6"/>
+          <circle cx="30" cy="150" r="22" fill="#0f1a12" opacity=".7"/>
+          <circle cx="490" cy="80" r="20" fill="#0f1a12" opacity=".6"/>
+          <circle cx="520" cy="160" r="25" fill="#0f1a12" opacity=".7"/>
+          <circle cx="80" cy="360" r="20" fill="#0f1a12" opacity=".6"/>
+          <circle cx="460" cy="370" r="24" fill="#0f1a12" opacity=".7"/>
+          <circle cx="280" cy="390" r="18" fill="#0f1a12" opacity=".5"/>
+          <circle cx="160" cy="380" r="15" fill="#0f1a12" opacity=".5"/>
+          <g><rect class="bloque-body" id="hb-20" x="80" y="60" width="160" height="100" fill="#1a2035" rx="4"/><rect x="110" y="85" width="100" height="50" fill="#0d1017" opacity=".6" rx="2"/><text class="bloque-label" x="160" y="78">20</text><text class="bloque-db" id="hdb-20" x="160" y="122">—</text><text class="bloque-nivel" id="hnv-20" x="160" y="148">—</text></g>
+          <g><rect class="bloque-body" id="hb-19" x="310" y="40" width="180" height="160" fill="#1a2035" rx="4"/><rect x="345" y="75" width="110" height="90" fill="#0d1017" opacity=".6" rx="2"/><text class="bloque-label" x="400" y="58">19</text><text class="bloque-db" id="hdb-19" x="400" y="175">—</text><text class="bloque-nivel" id="hnv-19" x="400" y="190">—</text></g>
+          <g><rect class="bloque-body" id="hb-21" x="80" y="200" width="160" height="90" fill="#1a2035" rx="4"/><rect x="110" y="220" width="100" height="50" fill="#0d1017" opacity=".5" rx="2"/><text class="bloque-label" x="160" y="218">21</text><text class="bloque-db" id="hdb-21" x="160" y="262">—</text><text class="bloque-nivel" id="hnv-21" x="160" y="278">—</text></g>
+          <g><rect class="bloque-body" id="hb-18" x="160" y="315" width="200" height="80" fill="#1a2035" rx="4"/><rect x="195" y="332" width="130" height="46" fill="#0d1017" opacity=".5" rx="2"/><text class="bloque-label" x="260" y="332">18</text><text class="bloque-db" id="hdb-18" x="260" y="368">—</text><text class="bloque-nivel" id="hnv-18" x="260" y="382">—</text></g>
+        </svg>
+      </div>
+      <div class="hist-empty" id="hist-empty">Esperando datos históricos… los promedios se acumulan cada 5 min</div>
+    </div>
+  </div>
+
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
+import { getDatabase, ref, onValue } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-database.js";
+
+const app = initializeApp({ databaseURL: "https://alvison-d64ef-default-rtdb.firebaseio.com" });
+const db  = getDatabase(app);
+
+const DEFAULT = [
+  { id:"sensor_1", name:"Sensor 1", bloque:18 },
+  { id:"sensor_2", name:"Sensor 2", bloque:20 },
+  { id:"sensor_3", name:"Sensor 3", bloque:19 },
+  { id:"sensor_4", name:"Sensor 4", bloque:21 },
+];
+let sensors = JSON.parse(localStorage.getItem("alv_s") || "null") || DEFAULT;
+const DOT   = { 18:[260,355], 19:[400,120], 20:[160,110], 21:[160,245] };
+const live  = {};
+const hist  = {};
+let selIdx  = null;
+
+function color(db) {
+  if (db==null) return "#2a2f3d";
+  if (db<40) return "#00c853";   // verde intenso
+  if (db<50) return "#69f542";   // verde
+  if (db<55) return "#ffd600";   // amarillo
+  if (db<65) return "#ff6d00";   // naranja
+  return "#ff1744";              // rojo
+}
+function nivel(db) {
+  if (db==null) return "Sin datos";
+  if (db<40) return "Muy silencioso";
+  if (db<50) return "Silencioso";
+  if (db<55) return "Normal";
+  if (db<65) return "Pasillo activo";
+  return "Ruidoso";
+}
+function recomendacion(db) {
+  if (db==null) return { titulo:"Sin datos", texto:"Sensor sin conexión.", icono:"—" };
+  if (db<40) return {
+    titulo:"Ideal",
+    icono:"🧠",
+    texto:"Ambiente muy tranquilo, recomendado para tareas intelectuales exigentes. Permite la máxima retención de memoria."
+  };
+  if (db<50) return {
+    titulo:"Aceptable",
+    icono:"✅",
+    texto:"Nivel tolerable. La mayoría puede trabajar bien, aunque personas neurodivergentes pueden empezar a distraerse."
+  };
+  if (db<55) return {
+    titulo:"Distractor",
+    icono:"⚠️",
+    texto:"El cerebro gasta energía extra filtrando el entorno. Aparecen errores leves en tareas de precisión y mayor fatiga mental."
+  };
+  if (db<65) return {
+    titulo:"Interrupción",
+    icono:"🔶",
+    texto:"Se pierde la comprensión lectora compleja. El rendimiento en tareas de memoria a corto plazo cae significativamente."
+  };
+  return {
+    titulo:"Estrés físico",
+    icono:"🔴",
+    texto:"El cuerpo activa el cortisol. No solo no te concentras, sino que aumenta la irritabilidad y el cansancio mental tras 30 minutos."
+  };
+}
+
+// Live map
+function updateLive() {
+  [18,19,20,21].forEach(b => {
+    document.getElementById(`lb-${b}`).setAttribute("fill","#1a2035");
+    document.getElementById(`ldb-${b}`).textContent="—";
+    document.getElementById(`lnv-${b}`).textContent="Sin sensor";
+  });
+  for(let i=0;i<4;i++) document.getElementById(`ld-${i}`).setAttribute("display","none");
+  sensors.forEach((s,i) => {
+    const d=live[s.id], c=d?color(d.db):"#333", b=s.bloque;
+    document.getElementById(`lb-${b}`).setAttribute("fill", d?c+"33":"#1a2035");
+    document.getElementById(`ldb-${b}`).textContent = d?`${d.db.toFixed(1)} dB`:"—";
+    document.getElementById(`lnv-${b}`).textContent = d?nivel(d.db):"Sin sensor";
+    const g=document.getElementById(`ld-${i}`);
+    g.setAttribute("display","block");
+    const [cx,cy]=DOT[b]||[260,355];
+    [`lr-${i}`,`lc-${i}`].forEach(id=>{
+      document.getElementById(id).setAttribute("cx",cx);
+      document.getElementById(id).setAttribute("cy",cy);
+    });
+    document.getElementById(`lc-${i}`).setAttribute("fill",c);
+    document.getElementById(`lr-${i}`).setAttribute("stroke",c);
+    const l=document.getElementById(`ll-${i}`);
+    l.setAttribute("x",cx); l.setAttribute("y",cy+3);
+    l.textContent=`S${i+1}`;
+  });
+}
+
+// Slide panel
+let slideChart = null;
+
+window.openBloque = function(bloque) {
+  const idx = sensors.findIndex(s => s.bloque === bloque);
+  if (idx === -1) return;
+  selIdx = idx;
+  const s = sensors[idx], d = live[s.id], cl = d ? color(d.db) : "var(--muted)";
+  document.getElementById("slide-title").textContent = `${s.name} — Bloque ${s.bloque}`;
+  document.getElementById("slide-panel").classList.add("open");
+  document.getElementById("overlay").classList.add("open");
+  const body = document.getElementById("slide-body");
+
+  const pct = d ? Math.max(0,Math.min(100,((d.db-30)/60)*100)) : 0;
+  const rec = d ? recomendacion(d.db) : recomendacion(null);
+  body.innerHTML = `
+    <div class="slide-db-wrap">
+      <div class="slide-db-value" style="color:${cl}">${d ? d.db.toFixed(1) : "—"}<span class="slide-db-unit"> dB</span></div>
+      <div class="slide-nivel" style="color:${cl}">${d ? nivel(d.db) : "Sin conexión"}</div>
+      <div class="slide-bloque-badge">Bloque ${s.bloque}</div>
+    </div>
+    <div style="padding:0 4px">
+      <div class="color-bar"><div class="color-bar-cursor" style="left:${pct}%;background:${cl}"></div></div>
+      <div style="display:flex;justify-content:space-between;margin-top:4px;font-family:'DM Mono',monospace;font-size:.6rem;color:var(--muted)"><span>30 dB</span><span>90 dB</span></div>
+    </div>
+    <div style="background:var(--surface2);border:1px solid ${cl}33;border-left:3px solid ${cl};border-radius:8px;padding:14px 16px;display:flex;flex-direction:column;gap:6px">
+      <div style="display:flex;align-items:center;gap:8px">
+        <span style="font-size:1.3rem">${rec.icono}</span>
+        <span style="font-size:.75rem;font-weight:700;text-transform:uppercase;letter-spacing:.1em;color:${cl}">${rec.titulo}</span>
+      </div>
+      <p style="font-size:.78rem;color:var(--text);line-height:1.55;opacity:.85">${rec.texto}</p>
+    </div>
+    <div class="slide-stats">
+      <div class="stat-row"><span class="stat-label">Nivel</span><span class="stat-value">${d ? nivel(d.db) : "—"}</span></div>
+      <div class="stat-row"><span class="stat-label">Sensor ID</span><span class="stat-value">${s.id}</span></div>
+      <div class="stat-row"><span class="stat-label">Última lectura</span><span class="stat-value">${d ? d.fecha||"—" : "—"}</span></div>
+    </div>
+    <div style="font-size:.7rem;font-weight:700;text-transform:uppercase;letter-spacing:.1em;color:var(--muted)">Histórico</div>
+    <div style="position:relative;height:160px;background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:10px">
+      <canvas id="slide-chart"></canvas>
+    </div>
+    <div style="font-family:'DM Mono',monospace;font-size:.6rem;color:var(--muted);text-align:center">Actualización automática cada 2 s</div>
+  `;
+
+  // Renderizar gráfico histórico del sensor
+  if (slideChart) { slideChart.destroy(); slideChart = null; }
+  const pts = (hist[s.id] || []);
+  const ctx = document.getElementById("slide-chart");
+  if (ctx && pts.length > 0) {
+    slideChart = new Chart(ctx, {
+      type: "line",
+      data: {
+        labels: pts.map(p => p.fecha.slice(11,16)),
+        datasets: [{
+          data: pts.map(p => p.promedio_db),
+          borderColor: cl,
+          backgroundColor: cl + "20",
+          borderWidth: 2,
+          pointRadius: 2,
+          tension: 0.3,
+          fill: true,
+        }]
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        plugins: { legend: { display: false },
+          tooltip: { backgroundColor:"#111318", borderColor:"#1e2330", borderWidth:1,
+            bodyColor:"#e8eaf0", callbacks:{ label: c => ` ${c.parsed.y.toFixed(1)} dB` } }
+        },
+        scales: {
+          x: { ticks:{ color:"#5a6075", font:{family:"DM Mono",size:9}, maxTicksLimit:6 }, grid:{color:"#1e2330"} },
+          y: { min:30, max:90, ticks:{ color:"#5a6075", font:{family:"DM Mono",size:9}, callback: v=>v+" dB" }, grid:{color:"#1e2330"} }
+        }
+      }
+    });
+  } else if (ctx) {
+    ctx.parentElement.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--muted);font-family:DM Mono,monospace;font-size:.7rem">Sin datos históricos aún</div>';
+  }
+};
+
+// Alias para compatibilidad (por si quedó algún onclick viejo)
+window.openSensor = function(idx) { openBloque(sensors[idx]?.bloque); };
+window.closePanel = function() {
+  document.getElementById("slide-panel").classList.remove("open");
+  document.getElementById("overlay").classList.remove("open");
+  selIdx=null;
+};
+
+// Historical player
+let timeline=[], pidx=0, playing=false, pTimer=null, speeds=[1,2,4,8], sidx=0;
+
+function buildTimeline() {
+  const times=new Set();
+  sensors.forEach(s=>(hist[s.id]||[]).forEach(p=>times.add(p.fecha)));
+  const sorted=[...times].sort();
+  if (!sorted.length) { timeline=[]; return; }
+  timeline=sorted.map(t=>({
+    time:t,
+    snap:Object.fromEntries(sensors.map(s=>{
+      const p=(hist[s.id]||[]).find(x=>x.fecha===t);
+      return [s.id, p?p.promedio_db:null];
+    }))
+  }));
+  document.getElementById("hist-empty").style.display="none";
+  document.getElementById("player-controls").style.display="flex";
+  const sl=document.getElementById("slider");
+  sl.max=timeline.length-1;
+  document.getElementById("t-tot").textContent=sorted[sorted.length-1];
+  renderFrame(pidx);
+}
+
+function renderFrame(i) {
+  if (!timeline.length) return;
+  i=Math.max(0,Math.min(timeline.length-1,i));
+  pidx=i;
+  document.getElementById("slider").value=i;
+  const f=timeline[i];
+  document.getElementById("hist-ts").textContent=f.time;
+  document.getElementById("t-cur").textContent=f.time;
+  [18,19,20,21].forEach(b=>{
+    document.getElementById(`hb-${b}`).setAttribute("fill","#1a2035");
+    document.getElementById(`hdb-${b}`).textContent="—";
+    document.getElementById(`hnv-${b}`).textContent="—";
+  });
+  sensors.forEach(s=>{
+    const v=f.snap[s.id]; if (v==null) return;
+    const b=s.bloque, c=color(v);
+    document.getElementById(`hb-${b}`).setAttribute("fill",c+"44");
+    document.getElementById(`hdb-${b}`).textContent=`${v.toFixed(1)} dB`;
+    document.getElementById(`hnv-${b}`).textContent=nivel(v);
+  });
+}
+
+window.togglePlay=function(){
+  playing=!playing;
+  document.getElementById("play-icon").innerHTML=playing
+    ?'<path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/>'
+    :'<path d="M8 5v14l11-7z"/>';
+  if (playing) {
+    if (pidx>=timeline.length-1) pidx=0;
+    const ms=Math.max(250,1500/speeds[sidx]);
+    pTimer=setInterval(()=>{ if(pidx>=timeline.length-1){window.togglePlay();return;} renderFrame(pidx+1); },ms);
+  } else { clearInterval(pTimer); }
+};
+window.onSlider=function(v){ if(playing)window.togglePlay(); renderFrame(parseInt(v)); };
+window.cycleSpeed=function(){
+  sidx=(sidx+1)%speeds.length;
+  document.getElementById("spd").textContent=speeds[sidx];
+  if(playing){window.togglePlay();window.togglePlay();}
+};
+
+// Admin
+window.toggleAdmin=function(){
+  document.getElementById("admin-panel").classList.toggle("open");
+  const g=document.getElementById("admin-grid"); g.innerHTML="";
+  sensors.forEach((s,i)=>{
+    const c=document.createElement("div"); c.className="admin-card";
+    c.innerHTML=`
+      <label>ID Firebase</label><input id="ai-${i}" value="${s.id}">
+      <label>Nombre</label><input id="an-${i}" value="${s.name}">
+      <label>Bloque</label>
+      <select id="ab-${i}">${[18,19,20,21].map(b=>`<option value="${b}"${s.bloque==b?" selected":""}>${b}</option>`).join("")}</select>
+      <button class="admin-save" onclick="saveAdmin(${i})">Guardar</button>`;
+    g.appendChild(c);
+  });
+};
+window.saveAdmin=function(i){
+  sensors[i].id=document.getElementById(`ai-${i}`).value.trim();
+  sensors[i].name=document.getElementById(`an-${i}`).value.trim();
+  sensors[i].bloque=parseInt(document.getElementById(`ab-${i}`).value);
+  localStorage.setItem("alv_s",JSON.stringify(sensors));
+  subscribe(); updateLive();
+};
+
+// Firebase
+const unsubs=[];
+function subscribe(){
+  unsubs.forEach(u=>u&&u()); unsubs.length=0;
+  sensors.forEach(s=>{
+    unsubs.push(onValue(ref(db,`estados/${s.id}`),snap=>{
+      const v=snap.val();
+      if(v&&v.db!=null) live[s.id]={db:v.db,fecha:v.fecha||""};
+      else delete live[s.id];
+      updateLive();
+      if(selIdx!==null) openSensor(selIdx);
+      document.getElementById("last-update").textContent="Actualizado "+new Date().toLocaleTimeString("es-CO");
+    }));
+    unsubs.push(onValue(ref(db,`promedios/${s.id}`),snap=>{
+      const v=snap.val();
+      hist[s.id]=v?Object.values(v).filter(p=>p.promedio_db!=null).sort((a,b)=>new Date(a.fecha)-new Date(b.fecha)).slice(-120):[];
+      buildTimeline();
+    }));
+  });
+}
+
+updateLive();
+subscribe();
+
+window.toggleHistPanel = function() {
+  const body = document.getElementById("hist-body");
+  const chev = document.getElementById("hist-chevron");
+  const open = body.style.display === "none";
+  body.style.display = open ? "block" : "none";
+  chev.style.transform = open ? "rotate(180deg)" : "rotate(0deg)";
+};
+</script>
+</body>
+</html>
